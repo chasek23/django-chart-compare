@@ -15,21 +15,47 @@ class Compare(object):
     name_dict = None
     col_dict = None
 
-    def __init__(self, model):
-        setattr(self, 'model', model)
+    def __init__(self, model, request, **kwargs):
+        assert hasattr(model, 'Name'), "Model must have a Name attribute."
+        assert hasattr(model, 'df'), "Model must have a df associated with it. This should return a Pandas DataFrame."
+        self.model = model
+        self.get_comp_df(request, kwargs)
+
+    @staticmethod
+    def name_col(schedule_name, column_name):
+        return "{schedule_name} - {column_name}".format(schedule_name=schedule_name, column_name=column_name)
 
     def process_request(self, request, kwargs):
-        self = self.get_comp_dicts(request, kwargs['pk'], kwargs['slug'])
-        self = self.make_data_chart()
-        return self
+        self.get_comp_dicts(request, kwargs['pk'], kwargs['slug'])
+        self.make_data_chart()
+
+    def get_comp_df(self, request, kwargs):
+        df = pd.DataFrame()
+        pk_list = [kwargs['pk']] + kwargs['slug'].split('-')
+        for pk in pk_list:
+            other_df = self.model.objects.get(pk=pk).df
+            schedule_name = self.model.objects.get(pk=pk).Name
+            if not other_df.columns.empty:
+                # if has columns, else supply None and name column empty
+                if str(pk) in request.GET.keys():
+                    # if this schedule in get request, use col specifics, else use first col
+                    # TODO: create error handling
+                    assert (request.GET.get(str(pk)).isnumeric()), 'Columns must be specified by a number'
+                    col_name = other_df.columns[int(request.GET.get(str(pk)))]
+                else:
+                    col_name = other_df.columns[0]
+                df[self.name_col(schedule_name, col_name)] = other_df[col_name]
+            else:
+                df[self.name_col(schedule_name, 'Empty')] = None
+        self.df = df
 
     def get_comp_dicts(self, request, main_pk, slug):
         pk_list = [main_pk] + slug.split('-')
         name_dict = {}
         select_dict = {}
         for pk in pk_list:
-            schedule = self.model.objects.get(pk=pk)
-            name_dict[pk] = schedule.District.Name
+            matrix = self.model.objects.get(pk=pk)
+            name_dict[pk] = matrix.Name
             select_dict[pk] = 0
             if request.GET.get(str(pk)) is not None:
                 # TODO: Figure out why I put this
@@ -38,11 +64,10 @@ class Compare(object):
                 select_dict[pk] = 0
         self.select_dict = select_dict
         self.name_dict = name_dict
-        return self
 
     def make_col_name(self, col_name, columns):
         if col_name in columns:
-            # TODO: find a more more robust way to do this. Probably brakes after 10x like-names
+            # TODO: use .format
             if col_name[-1:] == ')':
                 return self.make_col_name(col_name[:-2] + str(int(col_name[-2])+1) + ')', columns)
             else:
@@ -66,7 +91,6 @@ class Compare(object):
         self.df = df[cols].sort_index()
         self.col_dict = col_dict
         print("Made chart in "+str(time.time()-t0)+" seconds")
-        return self  # .replace(to_replace=np.nan, value='None')
 
     def lane_comp_plotter(self):
         # TODO: Handle non-unique column headings
@@ -82,7 +106,6 @@ class Compare(object):
             running_max = max(running_max, y.max())
             p.line(y.index, y.values, line_color=mypalette[count], line_width=5, legend=name)
             count += 1
-
         p.y_range = Range1d(0, running_max * 1.1)  # Not sure why turn into string...
         p.legend.location = "bottom_right"
         script, div = components(p)
@@ -99,27 +122,8 @@ class Compare(object):
         for col in self.df.columns:
             d[col] = lambda x: '' if pd.isnull(x) else '${:,.2f}'.format(x)
         class_string = 'class="dataframe table table-hover table-bordered dataTable" '
-        return self.df.style.applymap(self.highlight_cols, subset=pd.IndexSlice[:, [self.df.columns[0]]]).set_table_attributes(class_string).format(d)
-
-    def lane_comp_plotter(self):
-        # TODO: Handle non-unique column headings
-        p = figure(width=self.Settings.plot_width, height=self.Settings.plot_height, title=self.Settings.plot_title)
-        p.left[0].formatter.use_scientific = False
-        numlines = len(self.df.columns)
-        mypalette = pallette[0:numlines]
-        running_max = 0
-        count = 0
-        for name in self.df:
-            y = self.df[name].astype('float')
-            y = y.loc[~pd.isnull(y)]
-            running_max = max(running_max, y.max())
-            p.line(y.index, y.values, line_color=mypalette[count], line_width=5, legend=name)
-            count += 1
-
-        p.y_range = Range1d(0, running_max * 1.1)  # Not sure why turn into string...
-        p.legend.location = "bottom_right"
-        script, div = components(p)
-        return script, div
+        return self.df.style.applymap(self.highlight_cols, subset=pd.IndexSlice[:, [self.df.columns[0]]]
+                                      ).set_table_attributes(class_string).format(d)
 
     class Settings(object):
         plot_width = 800
@@ -143,4 +147,5 @@ class Single(object):
             d[col] = lambda x: '' if pd.isnull(x) else '${:,.2f}'.format(x)
         class_string = 'class="dataframe table table-hover table-bordered dataTable" '
         return df.style.set_table_attributes(class_string).format(d)
+
 

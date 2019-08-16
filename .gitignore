@@ -2,3 +2,5 @@
 **/.env
 .idea/*
 dist/*
+**/tests
+**/build
