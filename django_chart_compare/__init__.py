@@ -1,1 +1,1 @@
-from django_chart_compare.charters import Compare
+from django_chart_compare.charters import Compare, Single
