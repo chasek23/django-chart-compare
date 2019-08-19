@@ -20,6 +20,7 @@ class Compare(object):
         assert hasattr(model, 'df'), "Model must have a df associated with it. This should return a Pandas DataFrame."
         self.model = model
         self.get_comp_df(request, kwargs)
+        self.get_comp_dicts(request, kwargs['pk'], kwargs['slug'])
 
     @staticmethod
     def name_col(schedule_name, column_name):
@@ -58,12 +59,19 @@ class Compare(object):
             name_dict[pk] = matrix.Name
             select_dict[pk] = 0
             if request.GET.get(str(pk)) is not None:
-                # TODO: Figure out why I put this
                 select_dict[pk] = request.GET.get(str(pk))
             else:
                 select_dict[pk] = 0
         self.select_dict = select_dict
         self.name_dict = name_dict
+        self.make_col_dict()
+
+    def make_col_dict(self):
+        col_dict = {}
+        for pk in self.select_dict.keys():
+            matrix = self.model.objects.get(pk=pk)
+            col_dict[pk] = dict(zip(range(len(matrix.df.columns)), matrix.df.columns))
+        self.col_dict = col_dict
 
     def make_col_name(self, col_name, columns):
         if col_name in columns:
@@ -80,14 +88,15 @@ class Compare(object):
         col_dict = {}
         cols = []
         t0 = time.time()
-        for pk in self.select_dict:
-            lane = self.model.objects.get(pk=pk).load_column_data(self.select_dict[pk])
+        for pk in self.select_dict.keys():
+            matrix = self.model.objects.get(pk=pk)
+            lane = matrix.df[matrix.df.columns[self.select_dict[pk]]]
             col_name = self.make_col_name(str(lane.name) + ' - ' + self.name_dict[pk], df.columns)
             cols.append(col_name)
             lane = lane.rename(col_name)
             lane.index = pd.to_numeric(lane.index)
             df = pd.concat([df, lane], axis=1, sort=True)
-            col_dict[pk] = self.model.objects.get(pk=pk).load_columns()
+            col_dict[pk] = dict(zip(range(len(matrix.df.columns)), matrix.df.columns))
         self.df = df[cols].sort_index()
         self.col_dict = col_dict
         print("Made chart in "+str(time.time()-t0)+" seconds")
